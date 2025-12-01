@@ -53,11 +53,10 @@ DEFAULT_STATION_RATIOS = {
 # Google Sheet workarea（SSOT）
 # =========================
 WORKAREA_SHEET_CSV = (
-    "https://docs.google.com/sheets/d/"
+    "https://docs.google.com/spreadsheets/d/"
     "17lYLDZR_oDl1okvzlxb_Z6coiLuxsaCC55QZiYtsZ4w"
     "/export?format=csv&gid=0"
 )
-
 
 @st.cache_data(show_spinner=False)
 def load_workarea_master(url: str) -> pd.DataFrame:
