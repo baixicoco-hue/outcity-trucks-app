@@ -1,4 +1,4 @@
-# app.py  外城约车助手 V0.3.5
+# app.py  外城约车助手 V0.3.5
 # SSOT workarea + 缓存 + 未来增量(干线确定量+清关行预估车量 vs 产能扣未集包)
 # + 站点比例(固定/当天) + 路区比例分摊 + 围板箱优先估托
 # + OCF/JAX/MCO 城市维度估托 + SRQ/TPA 串联建议 + MCO.HUB 提示
@@ -443,20 +443,28 @@ def calc_trucks_by_type(
             "buffer_pallets": buffer,
         }
 
-    # 混用：保持“先 53 后 26”的托数逻辑；26 尺只补尾巴
-    t53 = pallets_final // cap_53_pallets
-    rem_pallets = pallets_final - t53 * cap_53_pallets
+    # 混用：【新逻辑：优先使用53尺车】
+    if mode == "mix":
+        if 0 < pallets_final <= cap_53_pallets:
+            # 托数在 1-30 之间，强制建议 1 辆 53 尺车
+            t53 = 1
+            t26 = 0
+            buffer = t53 * cap_53_pallets - pallets_final
+        else:
+            # 托数 > 30，或托数 <= 0（已在函数开头处理），走原逻辑：先 53 后 26
+            t53 = pallets_final // cap_53_pallets
+            rem_pallets = pallets_final - t53 * cap_53_pallets
 
-    # 尾巴部分仍按“托数/12 托”算一辆 26 尺，现实中这部分托数通常较少，误差可接受
-    t26 = math.ceil(rem_pallets / cap_26_pallets) if rem_pallets > 0 else 0
-    buffer = t53 * cap_53_pallets + t26 * cap_26_pallets - pallets_final
-
-    return {
-        "trucks_53": int(t53),
-        "trucks_26": int(t26),
-        "total_trucks": int(t53 + t26),
-        "buffer_pallets": int(buffer),
-    }
+            # 尾巴部分仍按“托数/12 托”算一辆 26 尺
+            t26 = math.ceil(rem_pallets / cap_26_pallets) if rem_pallets > 0 else 0
+            buffer = t53 * cap_53_pallets + t26 * cap_26_pallets - pallets_final
+        
+        return {
+            "trucks_53": int(t53),
+            "trucks_26": int(t26),
+            "total_trucks": int(t53 + t26),
+            "buffer_pallets": int(buffer),
+        }
 
 
 # =========================
