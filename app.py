@@ -326,7 +326,7 @@ if use_broker:
 arrival_forecast = int(linehaul_pkgs + broker_pkgs)
 
 # ----------------------------------------------------
-# 🔧 NEW：分拣产能预设
+# 🔧 分拣产能预设
 # ----------------------------------------------------
 st.sidebar.subheader("② 剩余产能（先扣全站未集包）")
 
@@ -964,21 +964,44 @@ if "SRQ" in raw_stations and "TPA" in raw_stations and selected_set & {"SRQ", "T
 
 # 2）MIA → WPB → MCO 串点建议（当前货量）
 has_mco_substation_today = any(s in raw_stations for s in MCO_HUB_GROUP)
-if "WPB" in raw_stations and has_mco_substation_today and selected_set & {"WPB", "MCO.HUB"}:
+
+# ✅ 这里放宽条件：只要勾了 WPB 或 MCO.HUB 其中一个，就提醒
+if "WPB" in raw_stations and has_mco_substation_today and ("WPB" in selected_set or "MCO.HUB" in selected_set):
     pallets_wpb = estimate_pallets_for_station(
         report_df, "WPB", wa_master, board_cap=board_cap, gay_cap=gay_cap
     )
     pallets_mcohub_now = estimate_pallets_for_mcohub(
         report_df, wa_master, board_cap=board_cap, gay_cap=gay_cap
     )
-    total_wpbhub = pallets_wpb + pallets_mcohub_now
-    if 0 < total_wpbhub <= 30:
-        st.info(
-            f"📌 线路提醒（WPB/MCO）：当前 WPB 约 {pallets_wpb} 托，MCO.HUB 合计约 {pallets_mcohub_now} 托，"
-            f"合计约 {total_wpbhub} 托（基于当前货量估算）。\n\n"
-            f"可考虑采用 **“MIA → WPB → MCO” 一车串点线路**，让 WPB 与 MCO.HUB 共用一辆 53 尺车，"
-            f"两边都不需要再单独增加一辆干线车。"
-        )
+
+    cap_53 = 30
+
+    if pallets_wpb > 0 and pallets_mcohub_now > 0:
+        full_trucks_wpb = pallets_wpb // cap_53
+        last_pallets_wpb = pallets_wpb % cap_53
+        total_wpbhub = pallets_wpb + pallets_mcohub_now
+
+        # 场景 A：两边货量都不满一车，合起来 ≤1 车
+        if total_wpbhub <= cap_53:
+            st.info(
+                f"📌 线路提醒（WPB/MCO，一车合并）：当前 WPB 约 {pallets_wpb} 托，"
+                f"MCO.HUB 合计约 {pallets_mcohub_now} 托，总计约 {total_wpbhub} 托。\n\n"
+                f"可考虑采用 **“MIA → WPB → MCO” 一车串点线路**，WPB 与 MCO.HUB 共用一辆 53 尺车，"
+                f"两边都无需再额外增加干线车。"
+            )
+
+        # 场景 B：WPB 有至少 1 辆满载车 + 最后一车较空，可以和 MCO.HUB 拼一车
+        elif full_trucks_wpb >= 1 and last_pallets_wpb > 0 and (last_pallets_wpb + pallets_mcohub_now) <= cap_53:
+            last_truck_index = full_trucks_wpb + 1
+            combined = last_pallets_wpb + pallets_mcohub_now
+            st.info(
+                f"📌 线路提醒（WPB/MCO，最后一车拼载）：当前 WPB 共约 {pallets_wpb} 托，"
+                f"约 {full_trucks_wpb} 辆 53 尺车满载 + 第 {last_truck_index} 辆约 {last_pallets_wpb} 托；"
+                f"MCO.HUB 合计约 {pallets_mcohub_now} 托。\n\n"
+                f"WPB 第 {last_truck_index} 辆车剩余 {last_pallets_wpb} 托 + MCO.HUB {pallets_mcohub_now} 托 "
+                f"≈ {combined} 托，可考虑合并装成 1 辆 53 尺车，线路 **“MIA → WPB → MCO”**，"
+                f"有助于提升最后一车的装载率。"
+            )
 
 # =========================
 # 缓存控制
