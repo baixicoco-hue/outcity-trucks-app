@@ -21,7 +21,7 @@ st.title("外城约车助手 V0.3.7（多站点串联估算 + 最终约车策略
 # =========================
 # 固定外城列表（按你们业务）
 # =========================
-OUTCITY_LIST = ["TPA", "WPB", "JAX", "OCF", "FTM", "SRQ", "MCO"]
+OUTCITY_LIST = ["TPA", "WPB", "JAX", "OCF", "FTM", "SRQ", "MCO", "MIA"]  # ✅ 加上 MIA
 
 # 这些站在 MIA 不按路区分拣，只按城市维度
 CITY_ONLY_STATIONS = {"OCF", "JAX", "MCO", "MCO.HUB"}
@@ -302,24 +302,47 @@ else:
 st.sidebar.markdown("---")
 st.sidebar.header("后续增量估算（未来总增量）")
 
+# ✅ 用 session_state 记住干线/清关行输入，避免每次勾选站点都要重输
 st.sidebar.subheader("① 后面可能要做的货（干线 + 清关行）")
-use_linehaul = st.sidebar.checkbox("干线确定会来多少件", value=True)
+
+for key, default in [
+    ("use_linehaul", True),
+    ("linehaul_pkgs", 0),
+    ("use_broker", True),
+    ("broker_trucks", 0),
+    ("broker_pkgs_per_truck", 10000),
+]:
+    if key not in st.session_state:
+        st.session_state[key] = default
+
+# 干线：是否勾选 + 车货量
+use_linehaul = st.sidebar.checkbox("干线确定会来多少件", key="use_linehaul")
 linehaul_pkgs = 0
 if use_linehaul:
     linehaul_pkgs = st.sidebar.number_input(
-        "干线确定来货量（件）", min_value=0, value=0, step=500
+        "干线确定来货量（件）",
+        min_value=0,
+        step=500,
+        key="linehaul_pkgs",
     )
 
-use_broker = st.sidebar.checkbox("清关行预估还会来多少车", value=True)
+# 清关行：车数 + 每车件数
+use_broker = st.sidebar.checkbox("清关行预估还会来多少车", key="use_broker")
 broker_trucks = 0
 broker_pkgs_per_truck = 10000
 broker_pkgs = 0
 if use_broker:
     broker_trucks = st.sidebar.number_input(
-        "清关行预计还会来几车货", min_value=0, value=0, step=1
+        "清关行预计还会来几车货",
+        min_value=0,
+        step=1,
+        key="broker_trucks",
     )
     broker_pkgs_per_truck = st.sidebar.number_input(
-        "清关行平均每车货量（默认10000）", min_value=0, value=10000, step=500
+        "清关行平均每车货量（默认10000）",
+        min_value=0,
+        step=500,
+        key="broker_pkgs_per_truck",
     )
     broker_pkgs = int(broker_trucks * broker_pkgs_per_truck)
 
@@ -965,7 +988,7 @@ if "SRQ" in raw_stations and "TPA" in raw_stations and selected_set & {"SRQ", "T
 # 2）MIA → WPB → MCO 串点建议（当前货量）
 has_mco_substation_today = any(s in raw_stations for s in MCO_HUB_GROUP)
 
-# ✅ 这里放宽条件：只要勾了 WPB 或 MCO.HUB 其中一个，就提醒
+# ✅ 放宽条件：只要勾了 WPB 或 MCO.HUB 其中一个，就提醒
 if "WPB" in raw_stations and has_mco_substation_today and ("WPB" in selected_set or "MCO.HUB" in selected_set):
     pallets_wpb = estimate_pallets_for_station(
         report_df, "WPB", wa_master, board_cap=board_cap, gay_cap=gay_cap
