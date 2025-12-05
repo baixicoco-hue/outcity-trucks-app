@@ -5,7 +5,7 @@
 # + MCO.HUB 站点视图（OCF+JAX+MCO 合并）
 # + 最小托数逻辑：每个路区至少一个围板箱
 # + 新增 V0.3.7:
-#   1. ✅ 约车逻辑 V4：混用模式采用“主力 53 尺 + 尾部按容器数量决定 53/26 尺”策略。
+#   1. ✅ 约车逻辑 V4：混用模式采用“主力 53 尺 + 尾部按托数决定 53/26 尺”策略（修正缓冲托数永不为负）。
 #   2. ✅ 产能设置：提供中班、大班、小班的产能预设，并支持自定义。
 #   3. ✅ 线路提醒：MIA→SRQ→TPA、MIA→WPB→MCO 串点提示（不改主逻辑，仅做提醒）。
 
@@ -538,7 +538,7 @@ def calc_trucks_by_type(
     mode: str = "mix",
     cap_53_pallets: int = 30,
     cap_26_pallets: int = 12,
-    cap_26_containers: int = 12,  # 26 尺车按容器数算
+    cap_26_containers: int = 12,  # 26 尺车按容器数算（仅在只用26模式里用）
     est_board_boxes: int | None = None,
     est_gaylords: int | None = None,
 ):
@@ -551,7 +551,7 @@ def calc_trucks_by_type(
             "suggestion_reason": "无货物",
         }
 
-    # 计算总容器数（用于 mix 模式的逻辑判断）
+    # 计算总容器数（用于展示说明，不再直接决定托数是否够）
     total_containers = None
     if est_board_boxes is not None and est_gaylords is not None:
         total_containers = est_board_boxes + est_gaylords
@@ -565,7 +565,7 @@ def calc_trucks_by_type(
             t26 = math.ceil(total_containers / cap_26_containers)
             buffer_containers = t26 * cap_26_containers - total_containers
             buffer_pallets_est = math.ceil(buffer_containers / 2)
-            reason = f"只用 26 尺车，按总容器数 {total_containers} / 12 计算。"
+            reason = f"只用 26 尺车，按总容器数 {total_containers} / {cap_26_containers} 计算。"
         else:
             t26 = math.ceil(pallets_final / cap_26_pallets)
             buffer_pallets_est = t26 * cap_26_pallets - pallets_final
@@ -591,59 +591,64 @@ def calc_trucks_by_type(
             "suggestion_reason": "只用 53 尺车，按总托数/30 计算。",
         }
 
-    # --- 3. 混用模式 (mix)：主力 53 尺 + 尾部 26 尺 ---
+    # --- 3. 混用模式 (mix)：主力 53 尺 + 尾部按托数决定 53/26 尺 ---
     if mode == "mix":
-        # 容器信息缺失的兜底逻辑
-        if total_containers is None:
-            t53 = math.ceil(pallets_final / cap_53_pallets)
-            buffer = t53 * cap_53_pallets - pallets_final
-            return {
-                "trucks_53": t53,
-                "trucks_26": 0,
-                "total_trucks": t53,
-                "buffer_pallets": buffer,
-                "suggestion_reason": "容器估算缺失，按总托数/30 建议 53 尺车。",
-            }
+        cap53 = cap_53_pallets
+        cap26 = cap_26_pallets
+        pallets = pallets_final
 
-        # --- 按容器数执行“主力 53 尺 + 尾部 26 尺”逻辑 ---
-        # 1. 计算所需 53 尺车数量 (全装满的整数车)
-        t53_full = math.floor(total_containers / cap_53_containers)
+        # 按托数的主逻辑：
+        # 1）优先用 53 尺车把能装满的托数装满；
+        # 2）看最后剩余托数，如果 <= 1 辆 26 尺车容量，用 26 尺；否则再加 1 辆 53 尺。
+        n53 = pallets // cap53
+        remain = pallets % cap53
 
-        # 剩余容器数量
-        remaining_containers = total_containers % cap_53_containers
-
-        t53 = t53_full
-        t26 = 0
-        reason = ""
-
-        # 2. 处理剩余货量
-        if remaining_containers == 0:
-            # 刚好装满整数车 53 尺车
-            t53 = max(1, t53_full)
-            reason = f"总容器 {total_containers} 个，刚好装满 {t53} 辆 53 尺车。"
-
-        elif remaining_containers <= cap_26_containers:
-            # 剩余 1–12 个容器：用 1 辆 26 尺车
-            t26 = 1
-            t53 = t53_full
-            reason = (
-                f"总容器 {total_containers} 个，主力使用 {t53} 辆 53 尺车，"
-                f"剩余 {remaining_containers} 个容器，建议用 1 辆 26 尺车装载。"
-            )
-
+        if n53 == 0:
+            # 总量都撑不起一整辆 53 尺
+            if pallets <= cap26:
+                t53, t26 = 0, 1
+                stage_reason = (
+                    f"总托数 {pallets} 托 ≤ 1 辆 26 尺车容量 {cap26} 托，"
+                    f"推荐 1 辆 26 尺车即可。"
+                )
+            else:
+                t53, t26 = 1, 0
+                stage_reason = (
+                    f"总托数 {pallets} 托介于 1 辆 26 尺和 1 辆 53 尺之间，"
+                    f"按“主力 53 尺”策略推荐 1 辆 53 尺车。"
+                )
         else:
-            # 剩余容器在 13–59 个之间：多加一辆 53 尺
-            t53 = t53_full + 1
+            if remain == 0:
+                t53, t26 = n53, 0
+                stage_reason = (
+                    f"总托数 {pallets} 托刚好装满 {n53} 辆 53 尺车。"
+                )
+            elif remain <= cap26:
+                t53, t26 = n53, 1
+                stage_reason = (
+                    f"总托数 {pallets} 托：先用 {n53} 辆 53 尺车装 {n53 * cap53} 托，"
+                    f"剩余 {remain} 托 ≤ 1 辆 26 尺车容量 {cap26} 托，"
+                    f"推荐再加 1 辆 26 尺车作为尾车。"
+                )
+            else:
+                t53, t26 = n53 + 1, 0
+                stage_reason = (
+                    f"总托数 {pallets} 托：先用 {n53} 辆 53 尺车装 {n53 * cap53} 托，"
+                    f"剩余 {remain} 托 > 1 辆 26 尺车容量 {cap26} 托，"
+                    f"推荐再加 1 辆 53 尺车。"
+                )
+
+        pallets_cap_53 = t53 * cap53
+        pallets_cap_26 = t26 * cap26
+        buffer = pallets_cap_53 + pallets_cap_26 - pallets_final  # 一定 >= 0
+
+        if total_containers is not None:
             reason = (
-                f"总容器 {total_containers} 个，主力使用 {t53_full} 辆 53 尺车后，"
-                f"剩余 {remaining_containers} 个容器 (>12)，建议多加 1 辆 53 尺车装载。"
+                f"总包裹约 {total_containers} 个容器，折算 {pallets_final} 托；"
+                + stage_reason
             )
-
-        # 3. 重新计算缓冲托数 (按最终车型组合的总容量 - 实际托数)
-        pallets_cap_53 = t53 * cap_53_pallets
-        pallets_cap_26 = t26 * cap_26_pallets
-
-        buffer = (pallets_cap_53 + pallets_cap_26) - pallets_final
+        else:
+            reason = "按总托数估算：" + stage_reason
 
         return {
             "trucks_53": t53,
@@ -907,7 +912,7 @@ st.success(
 )
 st.write(
     f"53尺车：{truck_plan['trucks_53']} 车（30托/车） | "
-    f"26尺车：{truck_plan['trucks_26']} 车（12容器/车）"
+    f"26尺车：{truck_plan['trucks_26']} 车（12托/车）"
 )
 st.write(f"剩余缓冲托数：{truck_plan['buffer_pallets']} 托（近似折算）")
 
