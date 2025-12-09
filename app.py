@@ -15,8 +15,41 @@ import math
 from datetime import datetime, time
 from typing import Dict, List, Tuple
 
-st.set_page_config(page_title="外城约车助手版本", layout="wide")
-st.title("外城约车助手 V0.3.7（多站点串联估算 + 最终约车策略）")
+st.set_page_config(page_title="外城约车助手 Out-city Truck Planner", layout="wide")
+
+# =========================
+# 语言切换 Language Switch
+# =========================
+lang_choice = st.sidebar.selectbox(
+    "语言 Language",
+    ["中英双语 / Bilingual", "仅中文 / Chinese", "English only / 仅英文"],
+    index=0,
+)
+
+if "Bilingual" in lang_choice:
+    LANG_MODE = "bi"
+elif "English" in lang_choice:
+    LANG_MODE = "en"
+else:
+    LANG_MODE = "zh"
+
+
+def tr(zh: str, en: str) -> str:
+    """简单多语言：根据 LANG_MODE 返回中文/英文/双语"""
+    if LANG_MODE == "zh":
+        return zh
+    elif LANG_MODE == "en":
+        return en
+    else:
+        return f"{zh} / {en}"
+
+
+st.title(
+    tr(
+        "外城约车助手 V0.3.7（多站点串联估算 + 最终约车策略）",
+        "Out-city Truck Planner V0.3.7 (Multi-station Estimation + Final Truck Strategy)",
+    )
+)
 
 # =========================
 # 固定外城列表（按你们业务）
@@ -47,7 +80,7 @@ DEFAULT_STATION_RATIOS = {
     "OCF": 0.024513,
     "SRQ": 0.046426,
     "TPA": 0.0475,
-    "WPB": 0.12566
+    "WPB": 0.12566,
 }
 
 # =========================
@@ -66,7 +99,12 @@ def load_workarea_master(url: str) -> pd.DataFrame:
     df.columns = df.columns.astype(str).str.strip()
 
     if "station3" not in df.columns:
-        raise ValueError("workarea master 缺少 station3 列，请检查 Google Sheet")
+        raise ValueError(
+            tr(
+                "workarea master 缺少 station3 列，请检查 Google Sheet",
+                "workarea master missing column 'station3'. Please check Google Sheet.",
+            )
+        )
 
     df["station3"] = df["station3"].astype(str).str.upper().str.strip()
 
@@ -78,22 +116,32 @@ def load_workarea_master(url: str) -> pd.DataFrame:
 try:
     wa_master = load_workarea_master(WORKAREA_SHEET_CSV)
 except Exception as e:
-    st.error(f"❌ workarea Google Sheet 读取失败：{e}")
+    st.error("❌ " + str(e))
     st.stop()
 
 # =========================
 # Sidebar: 上传明细文件
 # =========================
-st.sidebar.header("每日明细上传（可随时更新）")
-report_file = st.sidebar.file_uploader("上传明细报表（含集包时间）", type=["xlsx"])
+st.sidebar.header(
+    tr(
+        "每日明细上传（可随时更新）",
+        "Upload Daily Detail Report (can be updated anytime)",
+    )
+)
+report_file = st.sidebar.file_uploader(
+    tr("上传明细报表（含集包时间）", "Upload detail report (with bag time)"), type=["xlsx"]
+)
 if report_file is None:
-    st.info("请先在左侧上传明细报表")
+    st.info(
+        tr("请先在左侧上传明细报表", "Please upload the daily detail report on the left.")
+    )
     st.stop()
 
 
 @st.cache_data(show_spinner=False)
 def load_report_excel(file_bytes: bytes) -> pd.DataFrame:
     from io import BytesIO
+
     df = pd.read_excel(BytesIO(file_bytes), engine="openpyxl")
     df.columns = df.columns.astype(str).str.strip()
     if "邮编" in df.columns:
@@ -107,7 +155,12 @@ report_df = load_report_excel(report_bytes)
 required_cols = {"目的中心", "目的站点", "邮编", "运单号"}
 missing = required_cols - set(report_df.columns)
 if missing:
-    st.error(f"明细表缺少必要列：{missing}")
+    st.error(
+        tr(
+            f"明细表缺少必要列：{missing}",
+            f"Detail report missing required columns: {missing}",
+        )
+    )
     st.stop()
 
 report_df["目的中心_std"] = std_text(report_df["目的中心"])
@@ -117,7 +170,12 @@ report_df["station3"] = report_df["目的站点_std"].str[:3]
 # ===== 站点下拉：多选支持串联（OCF/JAX/MCO 合并为 MCO.HUB） =====
 raw_stations = sorted(set(report_df["station3"]) & set(OUTCITY_LIST))
 if not raw_stations:
-    st.error("明细里没有识别到外城站点（前三位），请确认目的站点字段")
+    st.error(
+        tr(
+            "明细里没有识别到外城站点（前三位），请确认目的站点字段",
+            "No out-city stations (first 3 chars) detected in the report. Please check the destination station field.",
+        )
+    )
     st.stop()
 
 has_hub = any(s in raw_stations for s in MCO_HUB_GROUP)
@@ -128,13 +186,15 @@ if has_hub:
 st.sidebar.markdown("---")
 # 🔧 多选，允许用户自定义串点
 selected_station3_list: List[str] = st.sidebar.multiselect(
-    "✅ 选择本次约车站点（可多选，Ctrl/Cmd 多选）",
+    tr("✅ 选择本次约车站点（可多选，Ctrl/Cmd 多选）", "✅ Select stations for this trucking (multi-select)"),
     display_stations,
-    default=[display_stations[0]] if display_stations else None  # 默认选中第一个
+    default=[display_stations[0]] if display_stations else None,
 )
 
 if not selected_station3_list:
-    st.warning("请至少选择一个站点进行估算")
+    st.warning(
+        tr("请至少选择一个站点进行估算", "Please select at least one station to estimate.")
+    )
     st.stop()
 
 # 将 MCO.HUB 展开为实际的站点列表，以便后续数据筛选
@@ -150,11 +210,13 @@ actual_station3_list = list(set(actual_station3_list))
 target_station3 = " / ".join(selected_station3_list)
 
 snapshot_time = st.sidebar.selectbox(
-    "本次快照时间（可选）",
-    ["17:00", "18:00", "19:00", "20:00", "21:00", "自定义"]
+    tr("本次快照时间（可选）", "Snapshot time (optional)"),
+    ["17:00", "18:00", "19:00", "20:00", "21:00", tr("自定义", "Custom")],
 )
-if snapshot_time == "自定义":
-    snapshot_time = st.sidebar.text_input("输入时间，如 19:30", value="19:30")
+if snapshot_time == tr("自定义", "Custom"):
+    snapshot_time = st.sidebar.text_input(
+        tr("输入时间，如 19:30", "Enter time, e.g., 19:30"), value="19:30"
+    )
 
 
 def parse_snapshot_to_time(s: str):
@@ -174,7 +236,7 @@ else:
     unbagged_all_cnt = 0
 
 # =========================
-# cached：计算单站路区货量 + 已/未集包 (保留单站计算，以供单站或 MCO.HUB 拆分使用)
+# cached：计算单站路区货量 + 已/未集包
 # =========================
 @st.cache_data(show_spinner=False)
 def calc_route_pkg_cached(
@@ -300,10 +362,14 @@ else:
 # Sidebar: 未来总增量估算
 # =========================
 st.sidebar.markdown("---")
-st.sidebar.header("后续增量估算（未来总增量）")
+st.sidebar.header(
+    tr("后续增量估算（未来总增量）", "Future volume forecast (total increase)")
+)
 
-# ✅ 用 session_state 记住干线/清关行输入，避免每次勾选站点都要重输
-st.sidebar.subheader("① 后面可能要做的货（干线 + 清关行）")
+# ✅ 用 session_state 记住干线/清关行输入
+st.sidebar.subheader(
+    tr("① 后面可能要做的货（干线 + 清关行）", "① Incoming volume (linehaul + broker)")
+)
 
 for key, default in [
     ("use_linehaul", True),
@@ -315,31 +381,35 @@ for key, default in [
     if key not in st.session_state:
         st.session_state[key] = default
 
-# 干线：是否勾选 + 车货量
-use_linehaul = st.sidebar.checkbox("干线确定会来多少件", key="use_linehaul")
+use_linehaul = st.sidebar.checkbox(
+    tr("干线确定会来多少件", "Linehaul confirmed volume (pcs)"),
+    key="use_linehaul",
+)
 linehaul_pkgs = 0
 if use_linehaul:
     linehaul_pkgs = st.sidebar.number_input(
-        "干线确定来货量（件）",
+        tr("干线确定来货量（件）", "Linehaul confirmed volume (pcs)"),
         min_value=0,
         step=500,
         key="linehaul_pkgs",
     )
 
-# 清关行：车数 + 每车件数
-use_broker = st.sidebar.checkbox("清关行预估还会来多少车", key="use_broker")
+use_broker = st.sidebar.checkbox(
+    tr("清关行预估还会来多少车", "Broker forecast: how many trucks still coming"),
+    key="use_broker",
+)
 broker_trucks = 0
 broker_pkgs_per_truck = 10000
 broker_pkgs = 0
 if use_broker:
     broker_trucks = st.sidebar.number_input(
-        "清关行预计还会来几车货",
+        tr("清关行预计还会来几车货", "Estimated broker trucks still coming"),
         min_value=0,
         step=1,
         key="broker_trucks",
     )
     broker_pkgs_per_truck = st.sidebar.number_input(
-        "清关行平均每车货量（默认10000）",
+        tr("清关行平均每车货量（默认10000）", "Average volume per broker truck (default 10,000 pcs)"),
         min_value=0,
         step=500,
         key="broker_pkgs_per_truck",
@@ -351,7 +421,9 @@ arrival_forecast = int(linehaul_pkgs + broker_pkgs)
 # ----------------------------------------------------
 # 🔧 分拣产能预设
 # ----------------------------------------------------
-st.sidebar.subheader("② 剩余产能（先扣全站未集包）")
+st.sidebar.subheader(
+    tr("② 剩余产能（先扣全站未集包）", "② Remaining sorting capacity (after unbagged)")
+)
 
 # 剩余时间计算
 cutoff_t = time(22, 0)
@@ -363,41 +435,62 @@ else:
     cutoff_dt = datetime.combine(datetime.today(), cutoff_t)
     remaining_hours_auto = max((cutoff_dt - snap_dt).total_seconds() / 3600, 0)
 
-override_hours = st.sidebar.checkbox("手动覆盖剩余小时（可选）", value=False)
+override_hours = st.sidebar.checkbox(
+    tr("手动覆盖剩余小时（可选）", "Manually override remaining hours (optional)"),
+    value=False,
+)
 if override_hours:
     remaining_hours = st.sidebar.number_input(
-        "覆盖后的剩余小时", min_value=0.0, value=remaining_hours_auto, step=0.5
+        tr("覆盖后的剩余小时", "Remaining hours (override)"),
+        min_value=0.0,
+        value=remaining_hours_auto,
+        step=0.5,
     )
 else:
     remaining_hours = remaining_hours_auto
-st.sidebar.caption(f"离22:00还剩 {remaining_hours:.1f} 小时")
+st.sidebar.caption(
+    tr(
+        f"离22:00还剩 {remaining_hours:.1f} 小时",
+        f"{remaining_hours:.1f} hours left until 22:00",
+    )
+)
 
 # 分拣人效预设
 st.sidebar.markdown("---")
-st.sidebar.subheader("分拣人效/产能设置")
+st.sidebar.subheader(
+    tr("分拣人效/产能设置", "Sorting productivity / capacity settings")
+)
 shift_options = {
-    "中班（默认）：12,000 件/小时": 12000,
-    "大班：16,000 件/小时": 16000,
-    "小班：8,000 件/小时": 8000,
-    "自定义": "custom",
+    tr("中班（默认）：12,000 件/小时", "Mid shift (default): 12,000 pcs/h"): 12000,
+    tr("大班：16,000 件/小时", "Big shift: 16,000 pcs/h"): 16000,
+    tr("小班：8,000 件/小时", "Small shift: 8,000 pcs/h"): 8000,
+    tr("自定义", "Custom"): "custom",
 }
 
 shift_selection = st.sidebar.selectbox(
-    "选择班次或人效预设：",
+    tr("选择班次或人效预设：", "Select shift / capacity preset:"),
     options=list(shift_options.keys()),
-    index=0,  # 默认选中中班
+    index=0,
 )
 
 sort_rate = 0
 if shift_options[shift_selection] == "custom":
     sort_rate = st.sidebar.number_input(
-        "自定义分拣产能（件/小时）", min_value=0, value=12000, step=500
+        tr("自定义分拣产能（件/小时）", "Custom sorting capacity (pcs/h)"),
+        min_value=0,
+        value=12000,
+        step=500,
     )
 else:
     sort_rate = shift_options[shift_selection]
 
 if shift_options[shift_selection] != "custom":
-    st.sidebar.caption(f"当前人效：{sort_rate:,} 件/小时")
+    st.sidebar.caption(
+        tr(
+            f"当前人效：{sort_rate:,} 件/小时",
+            f"Current productivity: {sort_rate:,} pcs/h",
+        )
+    )
 
 # 产能计算
 capacity_total = remaining_hours * sort_rate
@@ -406,24 +499,39 @@ future_total_increase = int(min(arrival_forecast, capacity_left_for_new))
 slack = capacity_left_for_new - arrival_forecast
 
 st.sidebar.caption(
-    f"来货预测合计 = 干线 {linehaul_pkgs:,.0f} 件 + "
-    f"清关行 {broker_trucks} 车×{broker_pkgs_per_truck:,.0f}≈{broker_pkgs:,.0f} 件 "
-    f"= {arrival_forecast:,.0f} 件"
+    tr(
+        f"来货预测合计 = 干线 {linehaul_pkgs:,.0f} 件 + "
+        f"清关行 {broker_trucks} 车×{broker_pkgs_per_truck:,.0f}≈{broker_pkgs:,.0f} 件 "
+        f"= {arrival_forecast:,.0f} 件",
+        f"Forecast total incoming = Linehaul {linehaul_pkgs:,.0f} pcs + "
+        f"Broker {broker_trucks} trucks × {broker_pkgs_per_truck:,.0f} ≈ {broker_pkgs:,.0f} pcs "
+        f"= {arrival_forecast:,.0f} pcs",
+    )
 )
 st.sidebar.info(
-    f"来货预测≈ {arrival_forecast:,.0f} 件；"
-    f"剩余产能≈ {capacity_total:,.0f} 件；\n"
-    f"全站未集包≈ {unbagged_all_cnt:,} 件（一定要先做）；\n"
-    f"可用于新来货的产能≈ {capacity_left_for_new:,.0f} 件；\n"
-    f"未来总增量=min(来货,可用产能)= {future_total_increase:,.0f} 件；\n"
-    f"{'✅ 产能足够，能做完所有后续来货' if slack >= 0 else '⚠️ 产能不足，部分后续来货做不完'}"
+    tr(
+        f"来货预测≈ {arrival_forecast:,.0f} 件；"
+        f"剩余产能≈ {capacity_total:,.0f} 件；\n"
+        f"全站未集包≈ {unbagged_all_cnt:,} 件（一定要先做）；\n"
+        f"可用于新来货的产能≈ {capacity_left_for_new:,.0f} 件；\n"
+        f"未来总增量=min(来货,可用产能)= {future_total_increase:,.0f} 件；\n"
+        f"{'✅ 产能足够，能做完所有后续来货' if slack >= 0 else '⚠️ 产能不足，部分后续来货做不完'}",
+        f"Forecast incoming ≈ {arrival_forecast:,.0f} pcs;\n"
+        f"Total remaining capacity ≈ {capacity_total:,.0f} pcs;\n"
+        f"Unbagged (all stations) ≈ {unbagged_all_cnt:,} pcs (must be done first);\n"
+        f"Capacity available for new incoming ≈ {capacity_left_for_new:,.0f} pcs;\n"
+        f"Future total increase = min(incoming, capacity) = {future_total_increase:,.0f} pcs;\n"
+        f"{'✅ Capacity is sufficient to finish all incoming' if slack >= 0 else '⚠️ Capacity insufficient; some incoming may not be finished.'}",
+    )
 )
 
 # =========================
 # Sidebar: 未来总增量 -> 站点比例
 # =========================
 st.sidebar.markdown("---")
-st.sidebar.subheader("③ 未来总增量按比例分摊到站点集合")
+st.sidebar.subheader(
+    tr("③ 未来总增量按比例分摊到站点集合", "③ Allocate future increase to selected stations by ratio")
+)
 
 
 @st.cache_data(show_spinner=False)
@@ -440,23 +548,23 @@ def calc_today_station_ratios(
 
 
 ratio_mode = st.sidebar.radio(
-    "站点集合比例来源：", ["固定比例（默认）", "按当天货量占比"], index=0
+    tr("站点集合比例来源：", "Ratio source for station group:"),
+    [tr("固定比例（默认）", "Fixed ratio (default)"), tr("按当天货量占比", "By today’s volume share")],
+    index=0,
 )
 
 
-# 调整后的分摊函数，适用于站点集合
 def get_station_group_forecast(total_inc: int, station_list: List[str]) -> int:
     if total_inc <= 0:
         return 0
 
-    if ratio_mode == "按当天货量占比":
+    if ratio_mode == tr("按当天货量占比", "By today’s volume share"):
         ratios_dict = calc_today_station_ratios(
             report_df, list(DEFAULT_STATION_RATIOS.keys())
         )
     else:
         ratios_dict = DEFAULT_STATION_RATIOS
 
-    # 计算所选站点集合的总比例（按实际站点）
     base_station_list = [s for s in station_list if s in DEFAULT_STATION_RATIOS]
     ratio = sum(ratios_dict.get(s, 0.0) for s in base_station_list)
 
@@ -467,7 +575,10 @@ forecast_in_station_group = get_station_group_forecast(
     future_total_increase, actual_station3_list
 )
 st.sidebar.caption(
-    f"本次约车站点集合未来增量 ≈ **{forecast_in_station_group:,}** 件"
+    tr(
+        f"本次约车站点集合未来增量 ≈ **{forecast_in_station_group:,}** 件",
+        f"Future increase for selected station group ≈ **{forecast_in_station_group:,}** pcs",
+    )
 )
 forecast_in_station = forecast_in_station_group
 
@@ -476,12 +587,18 @@ forecast_in_station = forecast_in_station_group
 # =========================
 st.sidebar.markdown("---")
 truck_mode = st.sidebar.radio(
-    "车型选择", ["混用（主力 53尺 + 尾部 26尺）", "只用53尺", "只用26尺"], index=0
+    tr("车型选择", "Truck type mode"),
+    [
+        tr("混用（主力 53尺 + 尾部 26尺）", "Mix (mainly 53-ft + tail 26-ft)"),
+        tr("只用53尺", "53-ft only"),
+        tr("只用26尺", "26-ft only"),
+    ],
+    index=0,
 )
 mode_map = {
-    "混用（主力 53尺 + 尾部 26尺）": "mix",
-    "只用53尺": "53_only",
-    "只用26尺": "26_only",
+    tr("混用（主力 53尺 + 尾部 26尺）", "Mix (mainly 53-ft + tail 26-ft)"): "mix",
+    tr("只用53尺", "53-ft only"): "53_only",
+    tr("只用26尺", "26-ft only"): "26_only",
 }
 truck_mode_key = mode_map[truck_mode]
 
@@ -489,20 +606,35 @@ truck_mode_key = mode_map[truck_mode]
 # Sidebar: 容器估算规则
 # =========================
 st.sidebar.markdown("---")
-st.sidebar.subheader("④ 容器估算规则（默认围板箱优先）")
+st.sidebar.subheader(
+    tr("④ 容器估算规则（默认围板箱 Box 优先）", "④ Container estimation (Box as default)")
+)
 prefer_board_only = st.sidebar.checkbox(
-    "默认按围板箱估托（未知容器数量时）", value=True
+    tr("默认按围板箱 Box 估托（未知容器数量时）", "Use Box as default when container counts unknown"),
+    value=True,
 )
 st.sidebar.caption(
-    "⚠️ 若已知实际围板箱/Gaylord 数，请勾选下方“我知道容器数量”并直接填写。"
+    tr(
+        "⚠️ 若已知实际 Box/Gaylord 数，请勾选下方“我知道容器数量”并直接填写。",
+        "⚠️ If actual Box/Gaylord counts are known, tick “I know container counts” below and enter directly.",
+    )
 )
 
-use_container = st.sidebar.checkbox("我知道当前容器数量（围板箱 + Gaylord）", value=False)
+use_container = st.sidebar.checkbox(
+    tr("我知道当前容器数量（Box + Gaylord）", "I know current container counts (Box + Gaylord)"),
+    value=False,
+)
 board_cap = st.sidebar.number_input(
-    "围板箱计划容量（件/箱）", min_value=150, value=250, step=10
+    tr("围板箱 Box 计划容量（件/箱）", "Box planned capacity (pcs/Box)"),
+    min_value=150,
+    value=250,
+    step=10,
 )
 gay_cap = st.sidebar.number_input(
-    "Gaylord 计划容量（件/个）", min_value=300, value=450, step=10
+    tr("Gaylord 计划容量（件/个）", "Gaylord planned capacity (pcs/each)"),
+    min_value=300,
+    value=450,
+    step=10,
 )
 
 board_cnt = gay_cnt = None
@@ -510,21 +642,31 @@ future_container_mode = None
 r_gay = 0.6  # 仅用于估算 fallback
 
 if use_container:
-    board_cnt = st.sidebar.number_input("当前围板箱数量", min_value=0, value=0, step=1)
-    gay_cnt = st.sidebar.number_input("当前 Gaylord 数量", min_value=0, value=0, step=1)
+    board_cnt = st.sidebar.number_input(
+        tr("当前 Box 数量", "Current Box count"), min_value=0, value=0, step=1
+    )
+    gay_cnt = st.sidebar.number_input(
+        tr("当前 Gaylord 数量", "Current Gaylord count"), min_value=0, value=0, step=1
+    )
 
     future_choice = st.sidebar.radio(
-        "未来新增货物预计主要使用的容器类型",
-        ["默认按围板箱为主", "未来新增全部用 Gaylord"],
+        tr("未来新增货物预计主要使用的容器类型", "Container type for future incoming"),
+        [tr("默认按 Box 为主", "Default: Box"), tr("未来新增全部用 Gaylord", "All future use Gaylord")],
         index=0,
     )
     future_container_mode = (
-        "gay" if future_choice == "未来新增全部用 Gaylord" else "board"
+        "gay"
+        if future_choice == tr("未来新增全部用 Gaylord", "All future use Gaylord")
+        else "board"
     )
 else:
     if not prefer_board_only:
         r_gay = st.sidebar.slider(
-            "Gaylord 占比（仅用于估算容器数量）", 0.0, 1.0, 0.6, 0.05
+            tr("Gaylord 占比（仅用于估算容器数量）", "Gaylord share (for estimation only)"),
+            0.0,
+            1.0,
+            0.6,
+            0.05,
         )
     else:
         r_gay = 0.0
@@ -548,7 +690,7 @@ def calc_trucks_by_type(
             "trucks_26": 0,
             "total_trucks": 0,
             "buffer_pallets": 0,
-            "suggestion_reason": "无货物",
+            "suggestion_reason": tr("无货物", "No volume."),
         }
 
     # 计算总容器数（用于展示说明，不再直接决定托数是否够）
@@ -565,11 +707,17 @@ def calc_trucks_by_type(
             t26 = math.ceil(total_containers / cap_26_containers)
             buffer_containers = t26 * cap_26_containers - total_containers
             buffer_pallets_est = math.ceil(buffer_containers / 2)
-            reason = f"只用 26 尺车，按总容器数 {total_containers} / {cap_26_containers} 计算。"
+            reason = tr(
+                f"只用 26 尺车，按总容器数 {total_containers} / {cap_26_containers} 计算。",
+                f"26-ft only, based on total containers {total_containers} / {cap_26_containers}.",
+            )
         else:
             t26 = math.ceil(pallets_final / cap_26_pallets)
             buffer_pallets_est = t26 * cap_26_pallets - pallets_final
-            reason = "只用 26 尺车，容器信息缺失，按总托数/12 兜底计算。"
+            reason = tr(
+                "只用 26 尺车，容器信息缺失，按总托数/12 兜底计算。",
+                "26-ft only. Container info missing, fallback to pallets/12.",
+            )
 
         return {
             "trucks_53": 0,
@@ -588,7 +736,10 @@ def calc_trucks_by_type(
             "trucks_26": 0,
             "total_trucks": t53,
             "buffer_pallets": buffer,
-            "suggestion_reason": "只用 53 尺车，按总托数/30 计算。",
+            "suggestion_reason": tr(
+                "只用 53 尺车，按总托数/30 计算。",
+                "53-ft only, based on pallets/30.",
+            ),
         }
 
     # --- 3. 混用模式 (mix)：主力 53 尺 + 尾部按托数决定 53/26 尺 ---
@@ -597,45 +748,44 @@ def calc_trucks_by_type(
         cap26 = cap_26_pallets
         pallets = pallets_final
 
-        # 按托数的主逻辑：
-        # 1）优先用 53 尺车把能装满的托数装满；
-        # 2）看最后剩余托数，如果 <= 1 辆 26 尺车容量，用 26 尺；否则再加 1 辆 53 尺。
         n53 = pallets // cap53
         remain = pallets % cap53
 
         if n53 == 0:
-            # 总量都撑不起一整辆 53 尺
             if pallets <= cap26:
                 t53, t26 = 0, 1
-                stage_reason = (
-                    f"总托数 {pallets} 托 ≤ 1 辆 26 尺车容量 {cap26} 托，"
-                    f"推荐 1 辆 26 尺车即可。"
+                stage_reason = tr(
+                    f"总托数 {pallets} 托 ≤ 1 辆 26 尺车容量 {cap26} 托，推荐 1 辆 26 尺车即可。",
+                    f"Total pallets {pallets} ≤ capacity of one 26-ft ({cap26}), recommend 1×26-ft.",
                 )
             else:
                 t53, t26 = 1, 0
-                stage_reason = (
-                    f"总托数 {pallets} 托介于 1 辆 26 尺和 1 辆 53 尺之间，"
-                    f"按“主力 53 尺”策略推荐 1 辆 53 尺车。"
+                stage_reason = tr(
+                    f"总托数 {pallets} 托介于 1 辆 26 尺和 1 辆 53 尺之间，按“主力 53 尺”策略推荐 1 辆 53 尺车。",
+                    f"Total pallets {pallets} between one 26-ft and one 53-ft, recommend 1×53-ft as main truck.",
                 )
         else:
             if remain == 0:
                 t53, t26 = n53, 0
-                stage_reason = (
-                    f"总托数 {pallets} 托刚好装满 {n53} 辆 53 尺车。"
+                stage_reason = tr(
+                    f"总托数 {pallets} 托刚好装满 {n53} 辆 53 尺车。",
+                    f"Total pallets {pallets} exactly fill {n53}×53-ft trucks.",
                 )
             elif remain <= cap26:
                 t53, t26 = n53, 1
-                stage_reason = (
+                stage_reason = tr(
                     f"总托数 {pallets} 托：先用 {n53} 辆 53 尺车装 {n53 * cap53} 托，"
-                    f"剩余 {remain} 托 ≤ 1 辆 26 尺车容量 {cap26} 托，"
-                    f"推荐再加 1 辆 26 尺车作为尾车。"
+                    f"剩余 {remain} 托 ≤ 1 辆 26 尺车容量 {cap26} 托，推荐再加 1 辆 26 尺车作为尾车。",
+                    f"Total pallets {pallets}: use {n53}×53-ft for {n53 * cap53} pallets, "
+                    f"remaining {remain} ≤ capacity of one 26-ft ({cap26}), so add 1×26-ft as tail truck.",
                 )
             else:
                 t53, t26 = n53 + 1, 0
-                stage_reason = (
+                stage_reason = tr(
                     f"总托数 {pallets} 托：先用 {n53} 辆 53 尺车装 {n53 * cap53} 托，"
-                    f"剩余 {remain} 托 > 1 辆 26 尺车容量 {cap26} 托，"
-                    f"推荐再加 1 辆 53 尺车。"
+                    f"剩余 {remain} 托 > 1 辆 26 尺车容量 {cap26} 托，推荐再加 1 辆 53 尺车。",
+                    f"Total pallets {pallets}: use {n53}×53-ft for {n53 * cap53} pallets, "
+                    f"remaining {remain} > capacity of one 26-ft ({cap26}), so add 1×53-ft more.",
                 )
 
         pallets_cap_53 = t53 * cap53
@@ -643,12 +793,12 @@ def calc_trucks_by_type(
         buffer = pallets_cap_53 + pallets_cap_26 - pallets_final  # 一定 >= 0
 
         if total_containers is not None:
-            reason = (
-                f"总包裹约 {total_containers} 个容器，折算 {pallets_final} 托；"
-                + stage_reason
-            )
+            reason = tr(
+                f"总约 {total_containers} 个容器，折算 {pallets_final} 托；",
+                f"Approx. {total_containers} containers → {pallets_final} pallets; ",
+            ) + stage_reason
         else:
-            reason = "按总托数估算：" + stage_reason
+            reason = tr("按总托数估算：", "Based on total pallets: ") + stage_reason
 
         return {
             "trucks_53": t53,
@@ -658,18 +808,17 @@ def calc_trucks_by_type(
             "suggestion_reason": reason,
         }
 
-    # 理论上不会走到这里
     return {
         "trucks_53": 0,
         "trucks_26": 0,
         "total_trucks": 0,
         "buffer_pallets": 0,
-        "suggestion_reason": "未知车型模式",
+        "suggestion_reason": tr("未知车型模式", "Unknown mode"),
     }
 
 
 # =========================
-# 工具函数：估任意站点当前托数 (用于 MCO.HUB 拆分展示 & 线路提示)
+# 工具函数：估任意站点当前托数
 # =========================
 def estimate_pallets_for_station(
     report_df: pd.DataFrame,
@@ -679,7 +828,7 @@ def estimate_pallets_for_station(
     gay_cap=450,
 ) -> int:
     """
-    ⚠️ 仅用于：
+    仅用于：
       1）MCO.HUB 组成拆分展示；
       2）线路提醒（SRQ/TPA、WPB/MCO）；
     不影响主托数主逻辑。
@@ -697,13 +846,11 @@ def estimate_pallets_for_station(
     if pkg_total_now_s == 0:
         return 0
 
-    # 城市维度站点 / 无路区映射：按总量估托
     if station3 in CITY_ONLY_STATIONS or route_pkg_s is None or route_pkg_s.empty:
         board_boxes = math.ceil(pkg_total_now_s / board_cap)
         pallets_est_s = math.ceil(board_boxes / 2)
         return pallets_est_s
 
-    # 有路区：每个路区至少一个围板箱，再按容量修正，然后全站汇总 /2 得托数
     route_boxes = route_pkg_s["pkg_cnt"].apply(
         lambda x: max(1, math.ceil(x / board_cap))
     )
@@ -735,7 +882,6 @@ if is_single_station and route_pkg is not None and not route_pkg.empty and pkg_t
     share = route_pkg_fc["pkg_cnt"] / pkg_total_now
     route_pkg_fc["future_add"] = (share * forecast_in_station).round().astype(int)
     route_pkg_fc["pkg_cnt_fc"] = route_pkg_fc["pkg_cnt"] + route_pkg_fc["future_add"]
-# 串点或 MCO.HUB 模式下 route_pkg_fc 保持 None
 
 # =========================
 # 托数估算（核心逻辑）
@@ -755,11 +901,12 @@ def calc_pallets_with_route(
     target_station3: str = "",
 ):
     """
-    返回：mode, final_cnt, pallets_est, pallets_final, cap_container, est_board_boxes, est_gaylords
+    返回：mode, final_cnt, pallets_est, pallets_final, cap_container,
+         est_board_boxes, est_gaylords
     """
     final_cnt = pkg_total_now + forecast_in_station
 
-    # ===== 情况1：已知当前围板箱 + Gaylord 数 =====
+    # 1. 已知 Box + Gaylord 数
     if board_cnt is not None and gay_cnt is not None:
         board_now = int(board_cnt)
         gay_now = int(gay_cnt)
@@ -788,14 +935,12 @@ def calc_pallets_with_route(
             gay_total,
         )
 
-    # ===== 情况2：不知道容器数量，用“估算逻辑”（兜底） =====
-    # 2-1 有路区、非城市维度站点（仅单站模式才进入此逻辑）
+    # 2. 不知道容器数量
     if (
         route_pkg_fc is not None
         and not route_pkg_fc.empty
         and target_station3 not in CITY_ONLY_STATIONS
     ):
-        # 每路区至少一个围板箱，然后用容量修正
         route_boxes = route_pkg_fc["pkg_cnt_fc"].apply(
             lambda x: max(1, math.ceil(x / board_cap))
         )
@@ -817,7 +962,6 @@ def calc_pallets_with_route(
             est_gaylords,
         )
 
-    # 2-2 城市维度站点 或 无路区映射 或 多站点串联：按总量估容器
     if final_cnt <= 0:
         return "no_data", final_cnt, 0, 0, 0, 0, 0
 
@@ -840,7 +984,6 @@ def calc_pallets_with_route(
     )
 
 
-# 实际调用：算托 + 容器估算
 (
     mode,
     final_cnt,
@@ -864,7 +1007,6 @@ def calc_pallets_with_route(
     target_station3=target_station3,
 )
 
-# 约车建议（主力 53 + 尾部 26）
 truck_plan = calc_trucks_by_type(
     pallets_final,
     mode=truck_mode_key,
@@ -876,54 +1018,101 @@ truck_plan = calc_trucks_by_type(
 # 展示区
 # =========================
 st.caption(
-    f"当前结果基于 {snapshot_time} 上传的明细快照，针对站点集合：**{target_station3}**"
+    tr(
+        f"当前结果基于 {snapshot_time} 上传的明细快照，针对站点集合：**{target_station3}**",
+        f"Results based on detail snapshot at {snapshot_time}, for stations: **{target_station3}**",
+    )
 )
 
 c1, c2, c3, c4 = st.columns(4)
-c1.metric("当前包裹总量(本集合)", f"{pkg_total_now:,}")
-c2.metric("已集包量", f"{bagged_cnt:,}" if bagged_cnt is not None else "N/A")
-c3.metric("未集包量(本集合)", f"{unbagged_cnt:,}" if unbagged_cnt is not None else "N/A")
-c4.metric("活跃路区数（单站时）", f"{active_routes:,}" if is_single_station else "N/A (串点模式)")
+c1.metric(
+    tr("当前包裹总量(本集合)", "Current packages (selected group)"),
+    f"{pkg_total_now:,}",
+)
+c2.metric(
+    tr("已集包量", "Bagged count"),
+    f"{bagged_cnt:,}" if bagged_cnt is not None else "N/A",
+)
+c3.metric(
+    tr("未集包量(本集合)", "Unbagged count (selected group)"),
+    f"{unbagged_cnt:,}" if unbagged_cnt is not None else "N/A",
+)
+c4.metric(
+    tr("活跃路区数（单站时）", "Active routes (single-station only)"),
+    f"{active_routes:,}" if is_single_station else tr("N/A (串点模式)", "N/A (multi-station)"),
+)
 
-st.caption(f"全站未集包合计（用于扣产能）：{unbagged_all_cnt:,} 件")
+st.caption(
+    tr(
+        f"全站未集包合计（用于扣产能）：{unbagged_all_cnt:,} 件",
+        f"Unbagged count (all stations, for capacity deduction): {unbagged_all_cnt:,} pcs",
+    )
+)
 
 if is_single_station and unmapped_zips > 0:
     st.warning(
-        f"⚠️ 有 {unmapped_zips} 个邮编未映射到路区，已按“每邮编=1个虚拟路区”计入最小容器需求。"
-        "建议更新该站点 workarea master。"
+        tr(
+            f"⚠️ 有 {unmapped_zips} 个邮编未映射到路区，已按“每邮编=1个虚拟路区”计入最小容器需求。建议更新该站点 workarea master。",
+            f"⚠️ {unmapped_zips} ZIP codes not mapped to routes. They are treated as virtual routes (min 1 Box each). Please update workarea master for this station.",
+        )
     )
 
 c5, c6, c7 = st.columns(3)
-c5.metric("预计截单前总包裹(本集合)", f"{final_cnt:,}")
-c6.metric("估算托数（容量换算）", f"{pallets_est}")
-c7.metric("最少托数（当前规则）", f"{pallets_final}")
+c5.metric(
+    tr("预计截单前总包裹(本集合)", "Estimated total packages before cutoff"),
+    f"{final_cnt:,}",
+)
+c6.metric(
+    tr("估算托数（容量换算）", "Estimated pallets (capacity-based)"),
+    f"{pallets_est}",
+)
+c7.metric(tr("最少托数（当前规则）", "Minimum pallets (current rule)"), f"{pallets_final}")
 
-# 额外展示估算容器数
 if (est_board_boxes or est_gaylords):
     c8, c9, _ = st.columns(3)
-    c8.metric("估算围板箱数（含未来）", f"{est_board_boxes:,}")
-    c9.metric("估算 Gaylord 数（含未来）", f"{est_gaylords:,}")
+    c8.metric(
+        tr("估算 Box 数（含未来）", "Estimated Box count (incl. future)"),
+        f"{est_board_boxes:,}",
+    )
+    c9.metric(
+        tr("估算 Gaylord 数（含未来）", "Estimated Gaylord count (incl. future)"),
+        f"{est_gaylords:,}",
+    )
 
-st.markdown("### 最少约车建议")
+st.markdown(tr("### 最少约车建议", "### Minimum trucking suggestion"))
 reason = truck_plan.get("suggestion_reason", "")
 st.success(
-    f"✅ 建议最少约 **{truck_plan['total_trucks']}** 车 "
-    f"（**{reason}**）"
+    tr(
+        f"✅ 建议最少约 **{truck_plan['total_trucks']}** 车 （**{reason}**）",
+        f"✅ Suggested minimum **{truck_plan['total_trucks']}** trucks (**{reason}**)",
+    )
 )
 st.write(
-    f"53尺车：{truck_plan['trucks_53']} 车（30托/车） | "
-    f"26尺车：{truck_plan['trucks_26']} 车（12托/车）"
+    tr(
+        f"53尺车：{truck_plan['trucks_53']} 车（30托/车） | 26尺车：{truck_plan['trucks_26']} 车（12托/车）",
+        f"53-ft: {truck_plan['trucks_53']} trucks (30 pallets/truck) | 26-ft: {truck_plan['trucks_26']} trucks (12 pallets/truck)",
+    )
 )
-st.write(f"剩余缓冲托数：{truck_plan['buffer_pallets']} 托（近似折算）")
+st.write(
+    tr(
+        f"剩余缓冲托数：{truck_plan['buffer_pallets']} 托（近似折算）",
+        f"Remaining buffer pallets: {truck_plan['buffer_pallets']} (approx.)",
+    )
+)
 
 if mode == "container_known":
     st.info(
-        f"当前 + 未来预计约 {est_board_boxes:,} 个围板箱、{est_gaylords:,} 个 Gaylord，"
-        f"按 2箱/托 + 1GL/托 估算出 {pallets_final} 托。"
+        tr(
+            f"当前 + 未来预计约 {est_board_boxes:,} 个 Box、{est_gaylords:,} 个 Gaylord，按 2箱/托 + 1GL/托 估算出 {pallets_final} 托。",
+            f"Current + future ≈ {est_board_boxes:,} Boxes and {est_gaylords:,} Gaylords; using 2 Boxes/pallet + 1 Gaylord/pallet gives {pallets_final} pallets.",
+        )
     )
 elif mode in {"route_board_only", "ratio_board_only", "city_only"}:
     st.caption(
-        f"容器数量为估算值：围板箱≈{est_board_boxes:,} 个、Gaylord≈{est_gaylords:,} 个（默认用围板箱）。"
+        tr(
+            f"容器数量为估算值：Box≈{est_board_boxes:,} 个、Gaylord≈{est_gaylords:,} 个（默认用 Box）。",
+            f"Container counts are estimated: Box≈{est_board_boxes:,}, Gaylord≈{est_gaylords:,} (Box used by default).",
+        )
     )
 
 # ===== MCO.HUB 城市维度估算拆分展示 =====
@@ -932,48 +1121,64 @@ if "MCO.HUB" in selected_station3_list:
         report_df, wa_master, board_cap=board_cap, gay_cap=gay_cap
     )
 
-    st.markdown("### MCO.HUB 组成站点托数估算（当前货量）")
+    st.markdown(
+        tr(
+            "### MCO.HUB 组成站点托数估算（当前货量）",
+            "### MCO.HUB component stations pallet estimation (current volume)",
+        )
+    )
     parts = {}
     for st3 in MCO_HUB_GROUP:
         parts[st3] = estimate_pallets_for_station(
             report_df, st3, wa_master, board_cap=board_cap, gay_cap=gay_cap
         )
     st.write(
-        f"OCF ≈ {parts.get('OCF',0)} 托，"
-        f"JAX ≈ {parts.get('JAX',0)} 托，"
-        f"MCO ≈ {parts.get('MCO',0)} 托，"
-        f"合计约 {pallets_mcohub} 托（仅当前货量，未含未来增量分摊）。"
+        tr(
+            f"OCF ≈ {parts.get('OCF',0)} 托，JAX ≈ {parts.get('JAX',0)} 托，MCO ≈ {parts.get('MCO',0)} 托，合计约 {pallets_mcohub} 托（仅当前货量，未含未来增量分摊）。",
+            f"OCF ≈ {parts.get('OCF',0)} pallets, JAX ≈ {parts.get('JAX',0)} pallets, MCO ≈ {parts.get('MCO',0)} pallets; total ≈ {pallets_mcohub} pallets (current volume only, future increase not allocated).",
+        )
     )
 
-# ===== 路区货量 + 围板箱换算表（仅单站且有路区时展示） =====
+# ===== 路区货量 + Box 换算表（仅单站且有路区时展示） =====
 if is_single_station and route_pkg_fc is not None and not route_pkg_fc.empty:
     show_df = route_pkg_fc.copy()
-    # 用“每路区至少1个围板箱 + 容量”估当前+未来的围板箱数
-    show_df["估算围板箱数(个)"] = show_df["pkg_cnt_fc"].apply(
+    show_df["估算 Box 数(个)"] = show_df["pkg_cnt_fc"].apply(
         lambda x: max(1, math.ceil(x / board_cap))
     )
-    show_df["估算托数(托，2箱/托)"] = show_df["估算围板箱数(个)"].apply(
+    show_df["估算托数(托，2Box/托)"] = show_df["估算 Box 数(个)"].apply(
         lambda x: int(math.ceil(x / 2))
     )
 
     st.markdown("---")
-    st.markdown("### 路区货量分布（含未来增量按路区比例分摊）")
-    st.dataframe(show_df.sort_values("pkg_cnt_fc", ascending=False), use_container_width=True)
+    st.markdown(
+        tr(
+            "### 路区货量分布（含未来增量按路区比例分摊）",
+            "### Route volume distribution (including allocated future increase)",
+        )
+    )
+    st.dataframe(
+        show_df.sort_values("pkg_cnt_fc", ascending=False), use_container_width=True
+    )
 
     st.download_button(
-        "下载路区分布+围板箱换算表",
+        tr("下载路区分布+Box 换算表", "Download route distribution + Box conversion"),
         data=show_df.to_csv(index=False).encode("utf-8-sig"),
-        file_name=f"{target_station3}_route_pkg_with_boardbox.csv",
+        file_name=f"{target_station3}_route_pkg_with_box.csv",
         mime="text/csv",
     )
 
-# ===== 线路提醒：MIA → SRQ → TPA、MIA → WPB → MCO （只做提示，不改主逻辑） =====
+# ===== 线路提醒 =====
 st.markdown("---")
-st.markdown("### 线路提醒（不影响托数与约车，仅作运营参考）")
+st.markdown(
+    tr(
+        "### 线路提醒（不影响托数与约车，仅作运营参考）",
+        "### Route hints (for ops reference only, no impact on pallets/trucks)",
+    )
+)
 
 selected_set = set(selected_station3_list)
 
-# 1）MIA → SRQ → TPA 串点建议（当前货量）
+# 1）MIA → SRQ → TPA
 if "SRQ" in raw_stations and "TPA" in raw_stations and selected_set & {"SRQ", "TPA"}:
     pallets_srq = estimate_pallets_for_station(
         report_df, "SRQ", wa_master, board_cap=board_cap, gay_cap=gay_cap
@@ -984,17 +1189,20 @@ if "SRQ" in raw_stations and "TPA" in raw_stations and selected_set & {"SRQ", "T
     total_st = pallets_srq + pallets_tpa
     if 0 < total_st <= 30:
         st.info(
-            f"📌 线路提醒（SRQ/TPA）：当前 SRQ 约 {pallets_srq} 托，TPA 约 {pallets_tpa} 托，"
-            f"合计约 {total_st} 托（基于当前货量估算）。\n\n"
-            f"可考虑采用 **“MIA → SRQ → TPA” 一车串点线路**，两站点共用一辆 53 尺车，"
-            f"减少单独干线车辆需求。"
+            tr(
+                f"📌 线路提醒（SRQ/TPA）：当前 SRQ 约 {pallets_srq} 托，TPA 约 {pallets_tpa} 托，合计约 {total_st} 托（基于当前货量估算）。\n\n"
+                f"可考虑采用 **“MIA → SRQ → TPA” 一车串点线路**，两站点共用一辆 53 尺车，减少单独干线车辆需求。",
+                f"📌 Route hint (SRQ/TPA): SRQ ≈ {pallets_srq} pallets, TPA ≈ {pallets_tpa} pallets, total ≈ {total_st} pallets (current estimate).\n\n"
+                f"Consider 1 truck route **“MIA → SRQ → TPA”** so SRQ and TPA share one 53-ft truck and reduce separate linehaul.",
+            )
         )
 
-# 2）MIA → WPB → MCO 串点建议（当前货量）
+# 2）MIA → WPB → MCO
 has_mco_substation_today = any(s in raw_stations for s in MCO_HUB_GROUP)
 
-# ✅ 放宽条件：只要勾了 WPB 或 MCO.HUB 其中一个，就提醒
-if "WPB" in raw_stations and has_mco_substation_today and ("WPB" in selected_set or "MCO.HUB" in selected_set):
+if "WPB" in raw_stations and has_mco_substation_today and (
+    "WPB" in selected_set or "MCO.HUB" in selected_set
+):
     pallets_wpb = estimate_pallets_for_station(
         report_df, "WPB", wa_master, board_cap=board_cap, gay_cap=gay_cap
     )
@@ -1009,32 +1217,38 @@ if "WPB" in raw_stations and has_mco_substation_today and ("WPB" in selected_set
         last_pallets_wpb = pallets_wpb % cap_53
         total_wpbhub = pallets_wpb + pallets_mcohub_now
 
-        # 场景 A：两边货量都不满一车，合起来 ≤1 车
         if total_wpbhub <= cap_53:
             st.info(
-                f"📌 线路提醒（WPB/MCO，一车合并）：当前 WPB 约 {pallets_wpb} 托，"
-                f"MCO.HUB 合计约 {pallets_mcohub_now} 托，总计约 {total_wpbhub} 托。\n\n"
-                f"可考虑采用 **“MIA → WPB → MCO” 一车串点线路**，WPB 与 MCO.HUB 共用一辆 53 尺车，"
-                f"两边都无需再额外增加干线车。"
+                tr(
+                    f"📌 线路提醒（WPB/MCO，一车合并）：当前 WPB 约 {pallets_wpb} 托，MCO.HUB 合计约 {pallets_mcohub_now} 托，总计约 {total_wpbhub} 托。\n\n"
+                    f"可考虑采用 **“MIA → WPB → MCO” 一车串点线路**，WPB 与 MCO.HUB 共用一辆 53 尺车，两边都无需再额外增加干线车。",
+                    f"📌 Route hint (WPB/MCO, combined in one truck): WPB ≈ {pallets_wpb} pallets, MCO.HUB ≈ {pallets_mcohub_now} pallets, total ≈ {total_wpbhub} pallets.\n\n"
+                    f"Consider 1 truck route **“MIA → WPB → MCO”** so WPB and MCO.HUB share one 53-ft truck, no extra linehaul needed.",
+                )
             )
 
-        # 场景 B：WPB 有至少 1 辆满载车 + 最后一车较空，可以和 MCO.HUB 拼一车
-        elif full_trucks_wpb >= 1 and last_pallets_wpb > 0 and (last_pallets_wpb + pallets_mcohub_now) <= cap_53:
+        elif (
+            full_trucks_wpb >= 1
+            and last_pallets_wpb > 0
+            and (last_pallets_wpb + pallets_mcohub_now) <= cap_53
+        ):
             last_truck_index = full_trucks_wpb + 1
             combined = last_pallets_wpb + pallets_mcohub_now
             st.info(
-                f"📌 线路提醒（WPB/MCO，最后一车拼载）：当前 WPB 共约 {pallets_wpb} 托，"
-                f"约 {full_trucks_wpb} 辆 53 尺车满载 + 第 {last_truck_index} 辆约 {last_pallets_wpb} 托；"
-                f"MCO.HUB 合计约 {pallets_mcohub_now} 托。\n\n"
-                f"WPB 第 {last_truck_index} 辆车剩余 {last_pallets_wpb} 托 + MCO.HUB {pallets_mcohub_now} 托 "
-                f"≈ {combined} 托，可考虑合并装成 1 辆 53 尺车，线路 **“MIA → WPB → MCO”**，"
-                f"有助于提升最后一车的装载率。"
+                tr(
+                    f"📌 线路提醒（WPB/MCO，最后一车拼载）：当前 WPB 共约 {pallets_wpb} 托，约 {full_trucks_wpb} 辆 53 尺车满载 + 第 {last_truck_index} 辆约 {last_pallets_wpb} 托；MCO.HUB 合计约 {pallets_mcohub_now} 托。\n\n"
+                    f"WPB 第 {last_truck_index} 辆车剩余 {last_pallets_wpb} 托 + MCO.HUB {pallets_mcohub_now} 托 ≈ {combined} 托，可考虑合并装成 1 辆 53 尺车，线路 **“MIA → WPB → MCO”**，有助于提升最后一车的装载率。",
+                    f"📌 Route hint (WPB/MCO, last truck combined): WPB total ≈ {pallets_wpb} pallets, about {full_trucks_wpb} full 53-ft trucks + truck #{last_truck_index} with ≈ {last_pallets_wpb} pallets; MCO.HUB ≈ {pallets_mcohub_now} pallets.\n\n"
+                    f"Truck #{last_truck_index} of WPB ({last_pallets_wpb} pallets) + MCO.HUB {pallets_mcohub_now} pallets ≈ {combined} pallets → can be combined into 1×53-ft route **“MIA → WPB → MCO”**, improving the last truck load factor.",
+                )
             )
 
 # =========================
 # 缓存控制
 # =========================
 st.sidebar.markdown("---")
-if st.sidebar.button("🔄 清空缓存并重算（比如workarea更新后）"):
+if st.sidebar.button(
+    tr("🔄 清空缓存并重算（比如workarea更新后）", "🔄 Clear cache & recalculate (e.g., after workarea update)")
+):
     st.cache_data.clear()
     st.rerun()
